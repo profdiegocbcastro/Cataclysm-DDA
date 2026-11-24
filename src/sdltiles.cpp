@@ -281,6 +281,21 @@ static point compute_drawable_dims()
 // Present rect in drawable px: largest integer buffer multiple that fits
 // (absorbs SCALING_FACTOR + HiDPI), top-left, remainder border. A fractional
 // fit would grid the minimap. Inverted by window_to_display_buffer_coords.
+static bool logical_presentation_active()
+{
+    int w = 0;
+    int h = 0;
+    SDL_RendererLogicalPresentation mode = SDL_LOGICAL_PRESENTATION_DISABLED;
+    return renderer && SDL_GetRenderLogicalPresentation( renderer.get(), &w, &h, &mode ) &&
+           mode != SDL_LOGICAL_PRESENTATION_DISABLED;
+}
+
+static bool display_buffer_fractional_fit( const point &b, const point &d, float &fit )
+{
+    fit = std::min( static_cast<float>( d.x ) / b.x, static_cast<float>( d.y ) / b.y );
+    return fit >= 1.2f && fit < 2.0f && !logical_presentation_active();
+}
+
 static SDL_Rect get_display_buffer_render_rect()
 {
     const point b = compute_display_buffer_dims();
@@ -288,8 +303,21 @@ static SDL_Rect get_display_buffer_render_rect()
     if( b.x <= 0 || b.y <= 0 ) {
         return SDL_Rect{ 0, 0, 0, 0 };
     }
+    float fit = 1.0f;
+    if( display_buffer_fractional_fit( b, d, fit ) ) {
+        const int w = static_cast<int>( std::lround( b.x * fit ) );
+        const int h = static_cast<int>( std::lround( b.y * fit ) );
+        return SDL_Rect{ ( d.x - w ) / 2, ( d.y - h ) / 2, w, h };
+    }
     const int scale = std::max( 1, std::min( d.x / b.x, d.y / b.y ) );
     return SDL_Rect{ 0, 0, b.x * scale, b.y * scale };
+}
+
+static bool display_buffer_is_fractionally_scaled()
+{
+    const point b = compute_display_buffer_dims();
+    float fit = 1.0f;
+    return b.x > 0 && b.y > 0 && display_buffer_fractional_fit( b, compute_drawable_dims(), fit );
 }
 #endif
 
@@ -1196,7 +1224,16 @@ void refresh_display()
     // would fractionally scale and grid the minimap.
     const SDL_Rect dstrect = get_display_buffer_render_rect();
     if( dstrect.w > 0 && dstrect.h > 0 ) {
+        SDL_ScaleMode previous_mode = SDL_SCALEMODE_NEAREST;
+        const bool smooth = display_buffer_is_fractionally_scaled() &&
+                            SDL_GetTextureScaleMode( display_buffer.get(), &previous_mode );
+        if( smooth ) {
+            SDL_SetTextureScaleMode( display_buffer.get(), SDL_SCALEMODE_LINEAR );
+        }
         RenderCopy( renderer, display_buffer, nullptr, &dstrect );
+        if( smooth ) {
+            SDL_SetTextureScaleMode( display_buffer.get(), previous_mode );
+        }
     } else {
         RenderCopy( renderer, display_buffer, nullptr, nullptr );
     }
@@ -1297,6 +1334,11 @@ SDL_Point window_to_display_buffer_coords( SDL_Point window_pt )
         float ry = 0.0f;
         if( SDL_RenderCoordinatesFromWindow( renderer.get(),
                                              static_cast<float>( window_pt.x ), static_cast<float>( window_pt.y ), &rx, &ry ) ) {
+            if( display_buffer_is_fractionally_scaled() ) {
+                const SDL_Rect dst = get_display_buffer_render_rect();
+                rx = ( rx - dst.x ) * buf_w / dst.w;
+                ry = ( ry - dst.y ) * buf_h / dst.h;
+            }
             return SDL_Point{ static_cast<int>( rx ), static_cast<int>( ry ) };
         }
     }

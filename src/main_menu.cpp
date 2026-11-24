@@ -142,9 +142,13 @@ std::vector<int> main_menu::print_menu_items( const catacurses::window &w_in,
         text += string_format( "[%s]", colorize( temp, iSel == i ? hilite( c_white ) : c_white ) );
     }
 
+    const int win_width = getmaxx( w_in );
+    if( win_width <= 0 ) {
+        return ret;
+    }
     int text_width = utf8_width_notags( text.c_str() );
-    if( text_width > getmaxx( w_in ) ) {
-        offset.y -= std::ceil( text_width / getmaxx( w_in ) );
+    if( text_width > win_width ) {
+        offset.y -= std::ceil( text_width / win_width );
     }
 
     std::vector<std::string> menu_txt = foldstring( text, getmaxx( w_in ), ']' );
@@ -412,11 +416,11 @@ void main_menu::init_windows()
     int extra_h = ( ( TERMY - FULL_SCREEN_HEIGHT ) / 2 ) - 1;
     extra_w = ( extra_w > 0 ? extra_w : 0 );
     extra_h = ( extra_h > 0 ? extra_h : 0 );
-    const int total_w = FULL_SCREEN_WIDTH + extra_w;
-    const int total_h = FULL_SCREEN_HEIGHT + extra_h;
+    const int total_w = std::min( FULL_SCREEN_WIDTH + extra_w, std::max( TERMX, 1 ) );
+    const int total_h = std::min( FULL_SCREEN_HEIGHT + extra_h, std::max( TERMY, 1 ) );
 
     // position of window within main display
-    const point p0( ( TERMX - total_w ) / 2, ( TERMY - total_h ) / 2 );
+    const point p0( std::max( 0, ( TERMX - total_w ) / 2 ), std::max( 0, ( TERMY - total_h ) / 2 ) );
 
     w_open = catacurses::newwin( total_h, total_w, p0 );
 
